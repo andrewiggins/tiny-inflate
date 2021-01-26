@@ -10,10 +10,21 @@ import { test } from 'uvu';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const uncompressed = readFileSync(__dirname + '/lorem.txt');
 
-let compressed, noCompression, fixed;
+/** @type {Buffer} */
+let compressed;
+/** @type {Buffer} */
+let noCompression;
+/** @type {Buffer} */
+let fixed;
 
+/**
+ * @param {Buffer} buf
+ * @param {import('zlib').ZlibOptions} options
+ * @returns {Promise<Buffer>}
+ */
 function deflate(buf, options) {
   return new Promise((resolve, reject) => {
+    /** @type {Uint8Array[]} */
     const chunks = [];
     createDeflateRaw(options)
       .on('data', (chunk) => {

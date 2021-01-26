@@ -11,6 +11,10 @@ class Tree {
 }
 
 class Data {
+  /**
+   * @param {Uint8Array} source
+   * @param {Uint8Array} dest
+   */
   constructor(source, dest) {
     this.source = source;
     this.sourceIndex = 0;
@@ -58,7 +62,12 @@ const lengths = new Uint8Array(288 + 32);
  * -- utility functions -- *
  * ----------------------- */
 
-/* build extra bits and base tables */
+/** Build extra bits and base tables
+ * @param {Uint8Array} bits
+ * @param {Uint16Array} base
+ * @param {number} delta
+ * @param {number} first
+ */
 function tinf_build_bits_base(bits, base, delta, first) {
   let i, sum;
 
@@ -73,7 +82,10 @@ function tinf_build_bits_base(bits, base, delta, first) {
   }
 }
 
-/* build the fixed huffman trees */
+/** Build the fixed huffman trees
+ * @param {Tree} lt
+ * @param {Tree} dt
+ */
 function tinf_build_fixed_trees(lt, dt) {
   let i;
 
@@ -97,9 +109,14 @@ function tinf_build_fixed_trees(lt, dt) {
   for (i = 0; i < 32; ++i) dt.trans[i] = i;
 }
 
-/* given an array of code lengths, build a tree */
 const offs = new Uint16Array(16);
 
+/** Given an array of code lengths, build a tree
+ * @param {Tree} t
+ * @param {Uint8Array} lengths
+ * @param {number} off
+ * @param {number} num
+ */
 function tinf_build_tree(t, lengths, off, num) {
   let i, sum;
 
@@ -127,7 +144,9 @@ function tinf_build_tree(t, lengths, off, num) {
  * -- decode functions -- *
  * ---------------------- */
 
-/* get one bit from source stream */
+/** Get one bit from source stream
+ * @param {Data} d
+ */
 function tinf_getbit(d) {
   /* check if tag is empty */
   if (!d.bitcount--) {
@@ -143,7 +162,11 @@ function tinf_getbit(d) {
   return bit;
 }
 
-/* read a num bit value from a stream and add base */
+/** Read a num bit value from a stream and add base
+ * @param {Data} d
+ * @param {number} num
+ * @param {number} base
+ */
 function tinf_read_bits(d, num, base) {
   if (!num) return base;
 
@@ -158,7 +181,10 @@ function tinf_read_bits(d, num, base) {
   return val + base;
 }
 
-/* given a data stream and a tree, decode a symbol */
+/** Given a data stream and a tree, decode a symbol
+ * @param {Data} d
+ * @param {Tree} t
+ */
 function tinf_decode_symbol(d, t) {
   while (d.bitcount < 24) {
     d.tag |= d.source[d.sourceIndex++] << d.bitcount;
@@ -186,7 +212,11 @@ function tinf_decode_symbol(d, t) {
   return t.trans[sum + cur];
 }
 
-/* given a data stream, decode dynamic trees from it */
+/** Given a data stream, decode dynamic trees from it
+ * @param {Data} d
+ * @param {Tree} lt
+ * @param {Tree} dt
+ */
 function tinf_decode_trees(d, lt, dt) {
   let hlit, hdist, hclen;
   let i, num, length;
@@ -252,7 +282,11 @@ function tinf_decode_trees(d, lt, dt) {
  * -- block inflate functions -- *
  * ----------------------------- */
 
-/* given a stream and two trees, inflate a block of data */
+/** Given a stream and two trees, inflate a block of data
+ * @param {Data} d
+ * @param {Tree} lt
+ * @param {Tree} dt
+ */
 function tinf_inflate_block_data(d, lt, dt) {
   while (1) {
     let sym = tinf_decode_symbol(d, lt);
@@ -286,7 +320,9 @@ function tinf_inflate_block_data(d, lt, dt) {
   }
 }
 
-/* inflate an uncompressed block of data */
+/** Inflate an uncompressed block of data
+ * @param {Data} d
+ */
 function tinf_inflate_uncompressed_block(d) {
   let length, invlength;
   let i;
@@ -323,7 +359,11 @@ function tinf_inflate_uncompressed_block(d) {
   return TINF_OK;
 }
 
-/* inflate stream from source to dest */
+/** Inflate stream from source to dest
+ * @param {Uint8Array} source
+ * @param {Uint8Array} dest
+ * @returns {Uint8Array}
+ */
 function tinf_uncompress(source, dest) {
   const d = new Data(source, dest);
   let bfinal, btype, res;
