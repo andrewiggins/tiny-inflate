@@ -1,5 +1,6 @@
 {
   "name": "tiny-inflate",
+  "type": "module",
   "version": "1.0.3",
   "description": "A tiny inflate implementation",
   "main": "index.js",
