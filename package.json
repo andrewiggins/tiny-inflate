@@ -23,6 +23,6 @@
   },
   "homepage": "https://github.com/devongovett/tiny-inflate",
   "devDependencies": {
-    "mocha": "^2.1.0"
+    "mocha": "^8.2.1"
   }
 }
