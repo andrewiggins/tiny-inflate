@@ -84,4 +84,13 @@ test('should handle typed arrays', () => {
   deepStrictEqual(out, new Uint8Array(uncompressed));
 });
 
+test('should handle simple input', () => {
+  let input = readFileSync(__dirname + '/simple.txt.deflate');
+  let expectedOut = readFileSync(__dirname + '/simple.txt', 'utf8');
+
+  let out = Buffer.alloc(expectedOut.length);
+  inflate(input, out);
+  deepStrictEqual(out.toString('utf8'), expectedOut);
+});
+
 test.run();

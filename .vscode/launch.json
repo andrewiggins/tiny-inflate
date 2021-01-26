@@ -7,9 +7,16 @@
     {
       "type": "pwa-node",
       "request": "launch",
-      "name": "Tests",
+      "name": "index tests",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/test/index.js"
+    },
+    {
+      "type": "pwa-node",
+      "request": "launch",
+      "name": "gunzip tests",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/test/gunzip.js"
     }
   ]
 }
