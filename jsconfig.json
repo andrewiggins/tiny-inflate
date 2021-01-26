@@ -1,5 +1,8 @@
 {
   "compilerOptions": {
-    "target": "es2018"
+    "target": "es2020",
+    "module": "es2020",
+    "moduleResolution": "node",
+    "checkJs": true
   }
 }
