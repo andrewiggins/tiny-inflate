@@ -1,3 +1,5 @@
+import { log, toHex, toChar } from './log.js';
+
 const TINF_OK = 0;
 const TINF_DATA_ERROR = -3;
 
@@ -197,6 +199,8 @@ function tinf_read_bits(d, num, base) {
   return val + base;
 }
 
+let lastSymbolLen = 0;
+
 /** Given a data stream and a tree, decode a symbol
  * @param {Data} d
  * @param {Tree} t
@@ -225,6 +229,7 @@ function tinf_decode_symbol(d, t) {
   d.tag = tag;
   d.bitcount -= len;
 
+  lastSymbolLen = len;
   return t.trans[sum + cur];
 }
 
@@ -240,15 +245,27 @@ function tinf_decode_trees(d, lt, dt) {
   /* get 5 bits HLIT (257-286) */
   // Read 5 bits to get the length of the literal/length huffman bit lengths
   hlit = tinf_read_bits(d, 5, 257);
+  log({
+    size: 5,
+    msg: `HLIT  ${hlit.toString().padStart(3)} (val:${hlit - 257})`,
+  });
 
   /* get 5 bits HDIST (1-32) */
   // Read 5 bits to get the length of the distance huffman bit lengths
   hdist = tinf_read_bits(d, 5, 1);
+  log({
+    size: 5,
+    msg: `HDIST ${hdist.toString().padStart(3)} (val:${hdist - 1})`,
+  });
 
   /* get 4 bits HCLEN (4-19) */
   // Read 4 bits to get the length of the run-length encoding huffman bit
   // lengths
   hclen = tinf_read_bits(d, 4, 4);
+  log({
+    size: 4,
+    msg: `HCLEN ${hclen.toString().padStart(3)} (val:${hclen - 4})`,
+  });
 
   // Re-initialize the shared lengths array to all zeros
   for (i = 0; i < 19; ++i) lengths[i] = 0;
@@ -318,14 +335,20 @@ function tinf_inflate_block_data(d, lt, dt) {
 
     /* check for end of block */
     if (sym === 256) {
+      log({ size: lastSymbolLen, msg: `End of block (val: ${sym})` });
+
       return TINF_OK;
     }
 
     if (sym < 256) {
+      log({ size: lastSymbolLen, msg: `${toHex(sym)}  ${toChar(sym)}` });
+
       d.dest[d.destLen++] = sym;
     } else {
       let length, dist, offs;
       let i;
+
+      let size = lastSymbolLen;
 
       // Convert the length symbol into an index into the length_bits and
       // length_base table
@@ -336,9 +359,11 @@ function tinf_inflate_block_data(d, lt, dt) {
       // length (the lowest length this symbol can represent) to the integer the
       // extra bits represent
       length = tinf_read_bits(d, length_bits[sym], length_base[sym]);
+      size += length_bits[sym];
 
       // Read the LZ77 distance symbol using the distance huffman tree
       dist = tinf_decode_symbol(d, dt);
+      size += lastSymbolLen;
 
       // https://tools.ietf.org/html/rfc1951#section-3.2.5
       // Read the extra bits for the LZ77 distance symbol, and its "base"
@@ -346,6 +371,9 @@ function tinf_inflate_block_data(d, lt, dt) {
       // that distance from the current length of the destination buffer to get
       // the offset this LZ77 back reference stats at
       offs = d.destLen - tinf_read_bits(d, dist_bits[dist], dist_base[dist]);
+      size += dist_bits[dist];
+
+      log({ size, msg: `(${length},${d.destLen - offs})` });
 
       // Copy the symbols represented by this LZ77 back reference to the end of
       // the destination buffer
@@ -407,6 +435,13 @@ function tinf_uncompress(source, dest) {
   do {
     /* read final block flag */
     bfinal = tinf_getbit(d);
+    log({
+      size: 1,
+      msg:
+        bfinal == 1
+          ? `Last block (val: ${bfinal})`
+          : `Not final (val: ${bfinal})`,
+    });
 
     /* read block type (2 bits) */
     btype = tinf_read_bits(d, 2, 0);
@@ -414,14 +449,20 @@ function tinf_uncompress(source, dest) {
     /* decompress block */
     switch (btype) {
       case 0:
+        log({ size: 2, msg: `Uncompressed block (val: ${btype})` });
+
         /* decompress uncompressed block */
         res = tinf_inflate_uncompressed_block(d);
         break;
       case 1:
+        log({ size: 2, msg: `Fixed Huffman Tree block (val: ${btype})` });
+
         /* decompress block with fixed huffman trees */
         res = tinf_inflate_block_data(d, sltree, sdtree);
         break;
       case 2:
+        log({ size: 2, msg: `Dynamic Huffman Tree block (val: ${btype})` });
+
         /* decompress block with dynamic huffman trees */
         tinf_decode_trees(d, d.ltree, d.dtree);
         res = tinf_inflate_block_data(d, d.ltree, d.dtree);

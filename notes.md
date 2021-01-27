@@ -1,5 +1,14 @@
 # Notes
 
+## Todo
+
+To explore:
+
+1. Logging huffman codes like defdb
+2. Producing logs in a machine readable format
+3. Write tests for logging (use defdb samples for validation)
+4. Tracking which indices in source array map to which logs
+
 Deflate uses the following compression mechanisms:
 
 1. LZ77 compression
@@ -260,6 +269,9 @@ Using that (**What to call this 3rd huffman bit length tree**) huffman tree, you
   - [Description of the above library](https://gist.github.com/101arrowz/253f31eb5abc3d9275ab943003ffecad)
 - [IETF RFC 1951 (Deflate)](https://www.ietf.org/rfc/rfc1951.txt)
 - [IETF RFC 1952 (Gzip file format)](https://tools.ietf.org/rfc/rfc1952.html)
+- [Someone doing SVG compression comparisons](https://github.com/subzey/svg-gz-supplement/)
+  - Has a nice breakdown of the deflate bytes
+  - [Medium article](https://blog.usejournal.com/of-svg-minification-and-gzip-21cd26a5d007)
 
 ## Relevant fflate source links
 
