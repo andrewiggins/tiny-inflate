@@ -8,8 +8,8 @@ import { deepStrictEqual, strictEqual } from 'assert';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 test('should handle simple input', () => {
-  let input = readFileSync(__dirname + '/simple.txt.gz');
-  let expectedOut = readFileSync(__dirname + '/simple.txt', 'utf8');
+  let input = readFileSync(__dirname + '/simple/simple.txt.gz');
+  let expectedOut = readFileSync(__dirname + '/simple/simple.txt', 'utf8');
 
   let out = Buffer.alloc(expectedOut.length);
   gunzip(input, out);
