@@ -16,12 +16,19 @@ class Data {
    * @param {Uint8Array} dest
    */
   constructor(source, dest) {
+    /** Source array of bytes */
     this.source = source;
+    /** Index of the next byte to load from source */
     this.sourceIndex = 0;
+
+    /** Buffer containing yet to be consumed bits from source */
     this.tag = 0;
+    /** The number of bits to consume from tag before loading more from source */
     this.bitcount = 0;
 
+    /** Destination array of bytes */
     this.dest = dest;
+    /** Number of bytes written to dest. Also the index to write they next byte to */
     this.destLen = 0;
 
     /** dynamic length/symbol tree */
@@ -150,9 +157,9 @@ function tinf_build_tree(t, lengths, off, num) {
 function tinf_getbit(d) {
   /* check if tag is empty */
   if (!d.bitcount--) {
-    /* load next tag */
+    /* load next byte into the buffer (i.e. tag) */
     d.tag = d.source[d.sourceIndex++];
-    d.bitcount = 7;
+    d.bitcount = 7; // bit count is seven since we are about to read a byte
   }
 
   /* shift bit out of tag */
@@ -163,18 +170,27 @@ function tinf_getbit(d) {
 }
 
 /** Read a num bit value from a stream and add base
- * @param {Data} d
- * @param {number} num
- * @param {number} base
+ * @param {Data} d The source data to read bits from
+ * @param {number} num The number of bits to read
+ * @param {number} base A base number to add to the read bit value. Many parts
+ * of the Deflate algorithm specify a base number to add to bits read so this is
+ * here for convenience
  */
 function tinf_read_bits(d, num, base) {
   if (!num) return base;
 
+  // TODO: Not sure why 24 is the chosen buffer here... `num` seems to work but
+  // other code paths also load 24 bits at a time
   while (d.bitcount < 24) {
     d.tag |= d.source[d.sourceIndex++] << d.bitcount;
     d.bitcount += 8;
   }
 
+  // Need to AND tag with 0b1111 where the number of 1s in the binary equal num.
+  // This line of code does that (up to 16 bits). 0xffff is 16 1s. Shift that
+  // binary 16 - num to end up with a binary that is of length num filled with
+  // 1s. In other words, if num is 2, 0b1111111111111111 >>> 14 = 0b11. Use the
+  // result to read the 0b11 bits of the tag.
   let val = d.tag & (0xffff >>> (16 - num));
   d.tag >>>= num;
   d.bitcount -= num;
@@ -222,27 +238,34 @@ function tinf_decode_trees(d, lt, dt) {
   let i, num, length;
 
   /* get 5 bits HLIT (257-286) */
+  // Read 5 bits to get the length of the literal/length huffman bit lengths
   hlit = tinf_read_bits(d, 5, 257);
 
   /* get 5 bits HDIST (1-32) */
+  // Read 5 bits to get the length of the distance huffman bit lengths
   hdist = tinf_read_bits(d, 5, 1);
 
   /* get 4 bits HCLEN (4-19) */
+  // Read 4 bits to get the length of the run-length encoding huffman bit
+  // lengths
   hclen = tinf_read_bits(d, 4, 4);
 
+  // Re-initialize the shared lengths array to all zeros
   for (i = 0; i < 19; ++i) lengths[i] = 0;
 
-  /* read code lengths for code length alphabet */
+  // Read run-length encoding bit lengths run-length encoding alphabet
   for (i = 0; i < hclen; ++i) {
     /* get 3 bits code length (0-7) */
     let clen = tinf_read_bits(d, 3, 0);
     lengths[clcidx[i]] = clen;
   }
 
-  /* build code length tree */
+  // Build run-length encoding huffman tree
   tinf_build_tree(code_tree, lengths, 0, 19);
 
-  /* decode code lengths for the dynamic trees */
+  // Decode the run-length encoded huffman bit counts for the literal/length
+  // huffman tree and distance huffman tree. Here we can just read the bit
+  // counts together into one array and then split the array at the end
   for (num = 0; num < hlit + hdist; ) {
     const sym = tinf_decode_symbol(d, code_tree);
 
@@ -283,9 +306,11 @@ function tinf_decode_trees(d, lt, dt) {
  * ----------------------------- */
 
 /** Given a stream and two trees, inflate a block of data
- * @param {Data} d
- * @param {Tree} lt
- * @param {Tree} dt
+ * @param {Data} d The source and destination data
+ * @param {Tree} lt The main huffman codes/tree. Includes the literal symbols
+ * and LZ77 length symbols (the length part of the LZ77 back reference)
+ * @param {Tree} dt The LZ77 distance huffman codes/tree (the distance part of
+ * the LZ77 back reference)
  */
 function tinf_inflate_block_data(d, lt, dt) {
   while (1) {
@@ -302,17 +327,28 @@ function tinf_inflate_block_data(d, lt, dt) {
       let length, dist, offs;
       let i;
 
+      // Convert the length symbol into an index into the length_bits and
+      // length_base table
       sym -= 257;
 
-      /* possibly get more bits from length code */
+      // https://tools.ietf.org/html/rfc1951#section-3.2.5
+      // Read the extra bits for this LZ77 length symbol, and add the "base"
+      // length (the lowest length this symbol can represent) to the integer the
+      // extra bits represent
       length = tinf_read_bits(d, length_bits[sym], length_base[sym]);
 
+      // Read the LZ77 distance symbol using the distance huffman tree
       dist = tinf_decode_symbol(d, dt);
 
-      /* possibly get more bits from distance code */
+      // https://tools.ietf.org/html/rfc1951#section-3.2.5
+      // Read the extra bits for the LZ77 distance symbol, and its "base"
+      // distance to the integer represented by the extra bits. Then subtract
+      // that distance from the current length of the destination buffer to get
+      // the offset this LZ77 back reference stats at
       offs = d.destLen - tinf_read_bits(d, dist_bits[dist], dist_base[dist]);
 
-      /* copy match */
+      // Copy the symbols represented by this LZ77 back reference to the end of
+      // the destination buffer
       for (i = offs; i < offs + length; ++i) {
         d.dest[d.destLen++] = d.dest[i];
       }
