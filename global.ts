@@ -23,17 +23,18 @@ interface BasicBitInfo {
 }
 
 interface LZ77Value {
+  /** The computed value used in the LZ77 back reference */
   value: number;
-  // symbol: number;
-  // extraBits: number;
+  /** The decoded symbol that started this LZ77 value */
+  symbol: number;
+  /** The encoded bits that map to the the defined symbol */
+  rawSymbol: number;
+  /** The extra bits associated  */
+  extraBits: number;
 }
 
 interface LZ77BitInfo {
   type: 'lz77';
-  /** Raw value from bit stream */
-  rawValue: number;
-  /** Computed meaningful value for Deflate algorithm */
-  value: number;
   loc: BitLocation;
   length: LZ77Value;
   dist: LZ77Value;

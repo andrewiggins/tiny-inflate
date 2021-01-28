@@ -377,6 +377,7 @@ function tinf_inflate_block_data(d, lt, dt) {
       let length, dist, offs;
       let i;
 
+      let lengthRaw = lastSymbolRaw;
       let size = lastSymbolLen;
 
       // Convert the length symbol into an index into the length_bits and
@@ -388,43 +389,46 @@ function tinf_inflate_block_data(d, lt, dt) {
       // length (the lowest length this symbol can represent) to the integer the
       // extra bits represent
       length = tinf_read_bits(d, length_bits[sym], length_base[sym]);
+
       size += length_bits[sym];
 
       // Read the LZ77 distance symbol using the distance huffman tree
       dist = tinf_decode_symbol(d, dt);
+
       size += lastSymbolLen;
+      let distRaw = lastSymbolRaw;
 
       // https://tools.ietf.org/html/rfc1951#section-3.2.5
       // Read the extra bits for the LZ77 distance symbol, and its "base"
       // distance to the integer represented by the extra bits. Then subtract
       // that distance from the current length of the destination buffer to get
       // the offset this LZ77 back reference stats at
-      offs = d.destLen - tinf_read_bits(d, dist_bits[dist], dist_base[dist]);
+      let distValue = tinf_read_bits(d, dist_bits[dist], dist_base[dist]);
+      offs = d.destLen - distValue;
       size += dist_bits[dist];
-
-      // TODO: Track full details
-      metadata.push({
-        type: 'lz77',
-        value: 0,
-        rawValue: 0,
-        loc: { index: d.bitIndex - size, length: size },
-        length: {
-          value: length,
-          // symbol: 0,
-          // extraBits: 0
-        },
-        dist: {
-          value: d.destLen - offs,
-          // symbol: 0,
-          // extraBits: 0
-        },
-      });
 
       // Copy the symbols represented by this LZ77 back reference to the end of
       // the destination buffer
       for (i = offs; i < offs + length; ++i) {
         d.dest[d.destLen++] = d.dest[i];
       }
+
+      metadata.push({
+        type: 'lz77',
+        loc: { index: d.bitIndex - size, length: size },
+        length: {
+          rawSymbol: lengthRaw,
+          symbol: sym + 257,
+          extraBits: length - length_base[sym],
+          value: length,
+        },
+        dist: {
+          rawSymbol: distRaw,
+          symbol: dist,
+          extraBits: distValue - dist_base[dist],
+          value: distValue,
+        },
+      });
     }
   }
 }
