@@ -1,7 +1,10 @@
-import { log, toHex, toChar } from './log.js';
+import { logMetadata } from './log.js';
 
 const TINF_OK = 0;
 const TINF_DATA_ERROR = -3;
+
+/** @type {Metadata} */
+let metadata = [];
 
 class Tree {
   constructor() {
@@ -22,6 +25,7 @@ class Data {
     this.source = source;
     /** Index of the next byte to load from source */
     this.sourceIndex = 0;
+    this.bitIndex = 0;
 
     /** Buffer containing yet to be consumed bits from source */
     this.tag = 0;
@@ -168,6 +172,8 @@ function tinf_getbit(d) {
   let bit = d.tag & 1;
   d.tag >>>= 1;
 
+  d.bitIndex += 1;
+
   return bit;
 }
 
@@ -196,10 +202,14 @@ function tinf_read_bits(d, num, base) {
   let val = d.tag & (0xffff >>> (16 - num));
   d.tag >>>= num;
   d.bitcount -= num;
+
+  d.bitIndex += num;
+
   return val + base;
 }
 
 let lastSymbolLen = 0;
+let lastSymbolRaw = 0;
 
 /** Given a data stream and a tree, decode a symbol
  * @param {Data} d
@@ -229,7 +239,10 @@ function tinf_decode_symbol(d, t) {
   d.tag = tag;
   d.bitcount -= len;
 
+  d.bitIndex += len;
   lastSymbolLen = len;
+  lastSymbolRaw = sum + cur; // TODO: is this right?
+
   return t.trans[sum + cur];
 }
 
@@ -245,26 +258,32 @@ function tinf_decode_trees(d, lt, dt) {
   /* get 5 bits HLIT (257-286) */
   // Read 5 bits to get the length of the literal/length huffman bit lengths
   hlit = tinf_read_bits(d, 5, 257);
-  log({
-    size: 5,
-    msg: `HLIT  ${hlit.toString().padStart(3)} (val:${hlit - 257})`,
+  metadata.push({
+    type: 'hlit',
+    value: hlit,
+    rawValue: hlit - 257,
+    loc: { index: d.bitIndex - 5, length: 5 },
   });
 
   /* get 5 bits HDIST (1-32) */
   // Read 5 bits to get the length of the distance huffman bit lengths
   hdist = tinf_read_bits(d, 5, 1);
-  log({
-    size: 5,
-    msg: `HDIST ${hdist.toString().padStart(3)} (val:${hdist - 1})`,
+  metadata.push({
+    type: 'hdist',
+    value: hdist,
+    rawValue: hdist - 1,
+    loc: { index: d.bitIndex - 5, length: 5 },
   });
 
   /* get 4 bits HCLEN (4-19) */
   // Read 4 bits to get the length of the run-length encoding huffman bit
   // lengths
   hclen = tinf_read_bits(d, 4, 4);
-  log({
-    size: 4,
-    msg: `HCLEN ${hclen.toString().padStart(3)} (val:${hclen - 4})`,
+  metadata.push({
+    type: 'hclen',
+    value: hclen,
+    rawValue: hclen - 4,
+    loc: { index: d.bitIndex - 4, length: 4 },
   });
 
   // Re-initialize the shared lengths array to all zeros
@@ -335,13 +354,23 @@ function tinf_inflate_block_data(d, lt, dt) {
 
     /* check for end of block */
     if (sym === 256) {
-      log({ size: lastSymbolLen, msg: `End of block (val: ${sym})` });
+      metadata.push({
+        type: 'block_end',
+        value: sym,
+        rawValue: lastSymbolRaw,
+        loc: { index: d.bitIndex - lastSymbolLen, length: lastSymbolLen },
+      });
 
       return TINF_OK;
     }
 
     if (sym < 256) {
-      log({ size: lastSymbolLen, msg: `${toHex(sym)}  ${toChar(sym)}` });
+      metadata.push({
+        type: 'literal',
+        value: sym,
+        rawValue: lastSymbolRaw,
+        loc: { index: d.bitIndex - lastSymbolLen, length: lastSymbolLen },
+      });
 
       d.dest[d.destLen++] = sym;
     } else {
@@ -373,7 +402,23 @@ function tinf_inflate_block_data(d, lt, dt) {
       offs = d.destLen - tinf_read_bits(d, dist_bits[dist], dist_base[dist]);
       size += dist_bits[dist];
 
-      log({ size, msg: `(${length},${d.destLen - offs})` });
+      // TODO: Track full details
+      metadata.push({
+        type: 'lz77',
+        value: 0,
+        rawValue: 0,
+        loc: { index: d.bitIndex - size, length: size },
+        length: {
+          value: length,
+          // symbol: 0,
+          // extraBits: 0
+        },
+        dist: {
+          value: d.destLen - offs,
+          // symbol: 0,
+          // extraBits: 0
+        },
+      });
 
       // Copy the symbols represented by this LZ77 back reference to the end of
       // the destination buffer
@@ -426,43 +471,44 @@ function tinf_inflate_uncompressed_block(d) {
 /** Inflate stream from source to dest
  * @param {Uint8Array} source
  * @param {Uint8Array} dest
- * @returns {Uint8Array}
+ * @returns {{ result: Uint8Array, metadata: Metadata }}
  */
 function tinf_uncompress(source, dest) {
+  metadata = [];
+
   const d = new Data(source, dest);
   let bfinal, btype, res;
 
   do {
     /* read final block flag */
     bfinal = tinf_getbit(d);
-    log({
-      size: 1,
-      msg:
-        bfinal == 1
-          ? `Last block (val: ${bfinal})`
-          : `Not final (val: ${bfinal})`,
+    metadata.push({
+      type: 'bfinal',
+      rawValue: bfinal,
+      value: bfinal,
+      loc: { index: d.bitIndex - 1, length: 1 },
     });
 
     /* read block type (2 bits) */
     btype = tinf_read_bits(d, 2, 0);
+    metadata.push({
+      type: 'btype',
+      rawValue: btype,
+      value: btype,
+      loc: { index: d.bitIndex - 2, length: 2 },
+    });
 
     /* decompress block */
     switch (btype) {
       case 0:
-        log({ size: 2, msg: `Uncompressed block (val: ${btype})` });
-
         /* decompress uncompressed block */
         res = tinf_inflate_uncompressed_block(d);
         break;
       case 1:
-        log({ size: 2, msg: `Fixed Huffman Tree block (val: ${btype})` });
-
         /* decompress block with fixed huffman trees */
         res = tinf_inflate_block_data(d, sltree, sdtree);
         break;
       case 2:
-        log({ size: 2, msg: `Dynamic Huffman Tree block (val: ${btype})` });
-
         /* decompress block with dynamic huffman trees */
         tinf_decode_trees(d, d.ltree, d.dtree);
         res = tinf_inflate_block_data(d, d.ltree, d.dtree);
@@ -474,15 +520,29 @@ function tinf_uncompress(source, dest) {
     if (res !== TINF_OK) throw new Error('Data error');
   } while (!bfinal);
 
+  let result = d.dest;
   if (d.destLen < d.dest.length) {
     if (typeof d.dest.slice === 'function') {
-      return d.dest.slice(0, d.destLen);
+      result = d.dest.slice(0, d.destLen);
     } else {
-      return d.dest.subarray(0, d.destLen);
+      result = d.dest.subarray(0, d.destLen);
     }
   }
 
-  return d.dest;
+  logMetadata(metadata);
+
+  // TODO: verify indexes and lengths
+  // let last = metadata[metadata.length - 1];
+  // if (last.loc.index + last.loc.length !== d.destLen * 8) {
+  //   let sum = metadata.reduce((sum, d) => sum + d.loc.length, 0);
+  //   throw new Error(
+  //     `Expected destLen: ${d.destLen * 8}. Sum: ${sum}. Got: (index: ${
+  //       last.loc.index
+  //     }, length: ${last.loc.length})`
+  //   );
+  // }
+
+  return { result, metadata };
 }
 
 /* -------------------- *

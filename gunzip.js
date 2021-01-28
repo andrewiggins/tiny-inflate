@@ -25,7 +25,7 @@ const gzl = (d) => {
 /** Expands GZIP data
  * @param {Uint8Array} data The data to decompress
  * @param {Uint8Array} out Where to write the data
- * @returns {Uint8Array} The decompressed version of the data
+ * @returns {{ result: Uint8Array, metadata: Metadata }} The decompressed version of the data
  */
 export default function gunzip(data, out = new Uint8Array(gzl(data))) {
   const gzipDataStart = gzs(data);

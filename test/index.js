@@ -60,9 +60,9 @@ test('should inflate some data', () => {
 
 test('should slice output buffer', () => {
   let out = Buffer.alloc(uncompressed.length + 1024);
-  let res = inflate(compressed, out);
-  deepStrictEqual(res, uncompressed);
-  strictEqual(res.length, uncompressed.length);
+  let { result } = inflate(compressed, out);
+  deepStrictEqual(result, uncompressed);
+  strictEqual(result.length, uncompressed.length);
 });
 
 test('should handle uncompressed blocks', () => {
