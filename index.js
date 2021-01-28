@@ -529,7 +529,7 @@ function tinf_uncompress(source, dest) {
     }
   }
 
-  logMetadata(metadata);
+  // logMetadata(metadata);
 
   // TODO: verify indexes and lengths
   // let last = metadata[metadata.length - 1];

@@ -1,54 +1,49 @@
 import gunzip from '../gunzip.js';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { test } from 'uvu';
 import { deepStrictEqual, strictEqual } from 'assert';
 import { formatMetadata } from '../log.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+/** @type {(...args: string[]) => string} */
+const root = (...args) => join(__dirname, ...args);
 
-/**
- * @param {string} path
- */
-function readFixture(path) {
-  return readFileSync(__dirname + path, 'utf8').replace(/\r\n/g, '\n');
-}
+/** @type {(path: string) => string} */
+const readFixture = (path) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
 
-test('should handle simple input', () => {
-  let input = readFileSync(__dirname + '/simple/simple.txt.gz');
-  let expectedOut = readFixture('/simple/simple.txt');
-  let expectedMeta = readFixture('/simple/metadata.txt');
+const testFiles = [
+  'simple/simple.txt',
+  'svg-1-original/image.svg',
+  'svg-2-svgo/image.svg',
+  'svg-3-viewbox/image.svg',
+  'svg-4-unclosed/image.svg',
+  'svg-5-lowercase/image.svg',
+  'svg-6-backrefs/image.svg',
+  'svg-7-hex/image.svg',
+];
 
-  let out = Buffer.alloc(expectedOut.length);
-  let { metadata } = gunzip(input, out);
+testFiles.forEach((testFile) => {
+  test(`should inflate ${testFile}`, () => {
+    let input = readFileSync(root(testFile + '.gz'));
+    let expectedOut = readFixture(root(testFile));
 
-  deepStrictEqual(out.toString('utf8'), expectedOut);
-  deepStrictEqual(formatMetadata(metadata), expectedMeta);
-});
+    let metadataPath = join(dirname(root(testFile)), 'metadata.txt');
+    let expectedMeta = null;
+    if (existsSync(metadataPath)) {
+      expectedMeta = readFixture(metadataPath);
+    }
 
-test('should handle SVG inputs', () => {
-  let input = readFileSync(__dirname + '/svg-1-original/image.svg.gz');
-  let expectedOut = readFixture('/svg-1-original/image.svg');
-  let expectedMeta = readFixture('/svg-1-original/metadata.txt');
+    let out = Buffer.alloc(expectedOut.length);
+    let { metadata } = gunzip(input, out);
 
-  let out = Buffer.alloc(expectedOut.length);
-  let { metadata } = gunzip(input, out);
+    deepStrictEqual(out.toString('utf8'), expectedOut);
 
-  deepStrictEqual(out.toString('utf8'), expectedOut);
-  deepStrictEqual(formatMetadata(metadata), expectedMeta);
-});
-
-test('should handle well optimized SVG inputs', () => {
-  let input = readFileSync(__dirname + '/svg-7-hex/image.svg.gz');
-  let expectedOut = readFixture('/svg-7-hex/image.svg');
-  let expectedMeta = readFixture('/svg-7-hex/metadata.txt');
-
-  let out = Buffer.alloc(expectedOut.length);
-  let { metadata } = gunzip(input, out);
-
-  deepStrictEqual(out.toString('utf8'), expectedOut);
-  deepStrictEqual(formatMetadata(metadata), expectedMeta);
+    if (expectedMeta) {
+      deepStrictEqual(formatMetadata(metadata), expectedMeta);
+    }
+  });
 });
 
 test.run();
