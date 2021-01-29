@@ -29,10 +29,15 @@ testFiles.forEach((testFile) => {
     let input = readFileSync(root(testFile + '.gz'));
     let expectedOut = readFixture(root(testFile));
 
-    let metadataPath = join(dirname(root(testFile)), 'metadata.txt');
+    let metadataPath = join(dirname(root(testFile)), 'defdb.txt');
     let expectedMeta = null;
     if (existsSync(metadataPath)) {
-      expectedMeta = readFixture(metadataPath);
+      expectedMeta = readFixture(metadataPath)
+        // Replace tab and line feed entries with their escape chars
+        .replace(/^(\s?\[[0-9]+\] 0A)/gm, '$1  \\n')
+        .replace(/^(\s?\[[0-9]+\] 09)/gm, '$1  \\t')
+        // Remove extra code length lengths that don't exist in the original file
+        .replace(/^\s?\[_\]\s+[0-9]+ CLL \(val: 0\)\n/gm, '');
     }
 
     let out = Buffer.alloc(expectedOut.length);

@@ -252,6 +252,7 @@ function tinf_decode_symbol(d, t) {
  * @param {Tree} dt
  */
 function tinf_decode_trees(d, lt, dt) {
+  /** @type {number} */
   let hlit, hdist, hclen;
   let i, num, length;
 
@@ -294,6 +295,15 @@ function tinf_decode_trees(d, lt, dt) {
     /* get 3 bits code length (0-7) */
     let clen = tinf_read_bits(d, 3, 0);
     lengths[clcidx[i]] = clen;
+
+    metadata.push({
+      type: 'code_length',
+      loc: { index: d.bitIndex - 3, length: 3 },
+      category: 'run_length_table',
+      symbol: clcidx[i],
+      huffmanCodeLength: clen,
+      rawValue: clen,
+    });
   }
 
   // Build run-length encoding huffman tree
@@ -305,30 +315,105 @@ function tinf_decode_trees(d, lt, dt) {
   for (num = 0; num < hlit + hdist; ) {
     const sym = tinf_decode_symbol(d, code_tree);
 
+    /** @type {CodeLengthCategory} */
+    const category = num < hlit ? 'lz77_length_table' : 'lz77_dist_table';
+    /** @type {(num: number) => number} */
+    const getRealSym = (num) =>
+      // For the lz77_length table, we think of symbols as the values 0 - 287
+      // while for the distance table we think of symbols as the values 0 - 31
+      category == 'lz77_length_table' ? num : num - hlit;
+
     switch (sym) {
-      case 16:
+      case 16: {
         /* copy previous code length 3-6 times (read 2 bits) */
         let prev = lengths[num - 1];
-        for (length = tinf_read_bits(d, 2, 3); length; --length) {
-          lengths[num++] = prev;
+
+        let symbols = [];
+        let repeatCount = tinf_read_bits(d, 2, 3);
+        for (length = repeatCount; length; --length) {
+          let sym = num++;
+          lengths[sym] = prev;
+
+          symbols.push(getRealSym(sym));
         }
+
+        metadata.push({
+          type: 'repeat_code_length',
+          loc: {
+            index: d.bitIndex - lastSymbolLen - 2,
+            length: lastSymbolLen + 2,
+          },
+          huffmanCodeLength: prev,
+          repeatCount,
+          rawValue: (lastSymbolRaw << 2) | (repeatCount - 3),
+          symbols,
+          category,
+        });
         break;
-      case 17:
+      }
+      case 17: {
         /* repeat code length 0 for 3-10 times (read 3 bits) */
-        for (length = tinf_read_bits(d, 3, 3); length; --length) {
-          lengths[num++] = 0;
+        let repeatCount = tinf_read_bits(d, 3, 3);
+        let symbols = [];
+        for (length = repeatCount; length; --length) {
+          let sym = num++;
+          lengths[sym] = 0;
+
+          symbols.push(getRealSym(sym));
         }
+
+        metadata.push({
+          type: 'repeat_code_length',
+          loc: {
+            index: d.bitIndex - lastSymbolLen - 3,
+            length: lastSymbolLen + 3,
+          },
+          huffmanCodeLength: 0,
+          repeatCount,
+          rawValue: (lastSymbolRaw << 3) | (repeatCount - 3),
+          symbols,
+          category,
+        });
         break;
-      case 18:
+      }
+      case 18: {
         /* repeat code length 0 for 11-138 times (read 7 bits) */
-        for (length = tinf_read_bits(d, 7, 11); length; --length) {
-          lengths[num++] = 0;
+        let repeatCount = tinf_read_bits(d, 7, 11);
+        let symbols = [];
+        for (length = repeatCount; length; --length) {
+          let sym = num++;
+          lengths[sym] = 0;
+
+          symbols.push(getRealSym(sym));
         }
+
+        metadata.push({
+          type: 'repeat_code_length',
+          loc: {
+            index: d.bitIndex - lastSymbolLen - 3,
+            length: lastSymbolLen + 7,
+          },
+          huffmanCodeLength: 0,
+          repeatCount,
+          rawValue: (lastSymbolRaw << 7) | (repeatCount - 11),
+          symbols,
+          category,
+        });
         break;
-      default:
+      }
+      default: {
         /* values 0-15 represent the actual code lengths */
         lengths[num++] = sym;
+        metadata.push({
+          type: 'code_length',
+          loc: { index: d.bitIndex - lastSymbolLen, length: lastSymbolLen },
+          rawValue: lastSymbolRaw,
+          huffmanCodeLength: sym,
+          symbol: getRealSym(num - 1),
+          category,
+        });
         break;
+      }
     }
   }
 

@@ -1,3 +1,5 @@
+// TODO: rawValue & bits
+
 type BitInfoType =
   | 'bfinal'
   | 'btype'
@@ -6,7 +8,14 @@ type BitInfoType =
   | 'hclen'
   | 'literal'
   | 'lz77'
-  | 'block_end';
+  | 'block_end'
+  | 'code_length'
+  | 'repeat_code_length';
+
+type CodeLengthCategory =
+  | 'run_length_table'
+  | 'lz77_length_table'
+  | 'lz77_dist_table';
 
 interface BitLocation {
   index: number;
@@ -14,7 +23,7 @@ interface BitLocation {
 }
 
 interface BasicBitInfo {
-  type: Exclude<BitInfoType, 'lz77'>;
+  type: Exclude<BitInfoType, 'lz77' | 'code_length' | 'repeat_code_length'>;
   /** Raw value from bit stream */
   rawValue: number;
   /** Computed meaningful value for Deflate algorithm */
@@ -40,6 +49,36 @@ interface LZ77BitInfo {
   dist: LZ77Value;
 }
 
-type BitInfo = BasicBitInfo | LZ77BitInfo;
+interface HuffmanCodeLengths {
+  type: 'code_length';
+  loc: BitLocation;
+  category: CodeLengthCategory;
+  /** Huffman encoded code length */
+  rawValue: number;
+  /** The symbol this code length represents */
+  symbol: number;
+  /** The decoded code length these bits represent */
+  huffmanCodeLength: number;
+}
+
+interface RepeatHuffmanCodeLengths {
+  type: 'repeat_code_length';
+  loc: BitLocation;
+  category: CodeLengthCategory;
+  /** The raw bits that represent this repeat code */
+  rawValue: number;
+  /** The decoded count to repeat this code length */
+  repeatCount: number;
+  /** The decoded huffman code length to repeat */
+  huffmanCodeLength: number;
+  /** The symbols this repeated huffman code length applies to */
+  symbols: number[];
+}
+
+type BitInfo =
+  | BasicBitInfo
+  | LZ77BitInfo
+  | HuffmanCodeLengths
+  | RepeatHuffmanCodeLengths;
 
 type Metadata = BitInfo[];
