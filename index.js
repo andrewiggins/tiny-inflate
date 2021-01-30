@@ -494,13 +494,17 @@ function tinf_inflate_block_data(d, lt, dt) {
 
       // Copy the symbols represented by this LZ77 back reference to the end of
       // the destination buffer
+      let values = [];
       for (i = offs; i < offs + length; ++i) {
-        d.dest[d.destLen++] = d.dest[i];
+        let value = d.dest[i];
+        d.dest[d.destLen++] = value;
+        values.push(value);
       }
 
       metadata.push({
         type: 'lz77',
         loc: { index: d.bitIndex - size, length: size },
+        values,
         length: {
           rawSymbol: lengthRaw,
           symbol: sym + 257,
@@ -617,19 +621,6 @@ function tinf_uncompress(source, dest) {
       result = d.dest.subarray(0, d.destLen);
     }
   }
-
-  // logMetadata(metadata);
-
-  // TODO: verify indexes and lengths
-  // let last = metadata[metadata.length - 1];
-  // if (last.loc.index + last.loc.length !== d.destLen * 8) {
-  //   let sum = metadata.reduce((sum, d) => sum + d.loc.length, 0);
-  //   throw new Error(
-  //     `Expected destLen: ${d.destLen * 8}. Sum: ${sum}. Got: (index: ${
-  //       last.loc.index
-  //     }, length: ${last.loc.length})`
-  //   );
-  // }
 
   return { result, metadata };
 }

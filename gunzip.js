@@ -30,5 +30,35 @@ const gzl = (d) => {
 export default function gunzip(data, out = new Uint8Array(gzl(data))) {
   const gzipDataStart = gzs(data);
   const gzipDataEnd = -8; // Gzip footer: -0 to -4 is length, -4 to -8 is CRC
-  return inflate(data.subarray(gzipDataStart, gzipDataEnd), out);
+  let { result, metadata } = inflate(
+    data.subarray(gzipDataStart, gzipDataEnd),
+    out
+  );
+
+  let lastIndex = 0;
+  return {
+    result,
+    metadata: [
+      {
+        type: 'gzip_header',
+        loc: { index: 0, length: gzipDataStart * 8 },
+        rawValue: Array.from(data.subarray(0, gzipDataStart)),
+      },
+      ...metadata.map((d) => {
+        lastIndex = d.loc.index + gzipDataStart * 8 + d.loc.length;
+        return {
+          ...d,
+          loc: {
+            index: d.loc.index + gzipDataStart * 8,
+            length: d.loc.length,
+          },
+        };
+      }),
+      {
+        type: 'gzip_footer',
+        loc: { index: lastIndex, length: 8 * 8 },
+        rawValue: Array.from(data.subarray(-8, 0)),
+      },
+    ],
+  };
 }

@@ -1,17 +1,5 @@
 // TODO: rawValue & bits
 
-type BitInfoType =
-  | 'bfinal'
-  | 'btype'
-  | 'hlit'
-  | 'hdist'
-  | 'hclen'
-  | 'literal'
-  | 'lz77'
-  | 'block_end'
-  | 'code_length'
-  | 'repeat_code_length';
-
 type CodeLengthCategory =
   | 'run_length_table'
   | 'lz77_length_table'
@@ -23,7 +11,14 @@ interface BitLocation {
 }
 
 interface BasicBitInfo {
-  type: Exclude<BitInfoType, 'lz77' | 'code_length' | 'repeat_code_length'>;
+  type:
+    | 'bfinal'
+    | 'btype'
+    | 'hlit'
+    | 'hdist'
+    | 'hclen'
+    | 'literal'
+    | 'block_end';
   /** Raw value from bit stream */
   rawValue: number;
   /** Computed meaningful value for Deflate algorithm */
@@ -45,6 +40,7 @@ interface LZ77Value {
 interface LZ77BitInfo {
   type: 'lz77';
   loc: BitLocation;
+  values: number[];
   length: LZ77Value;
   dist: LZ77Value;
 }
@@ -75,10 +71,26 @@ interface RepeatHuffmanCodeLengths {
   symbols: number[];
 }
 
+interface GzipHeader {
+  type: 'gzip_header';
+  loc: BitLocation;
+  rawValue: number[];
+}
+
+interface GzipFooter {
+  type: 'gzip_footer';
+  loc: BitLocation;
+  rawValue: number[];
+}
+
 type BitInfo =
   | BasicBitInfo
   | LZ77BitInfo
   | HuffmanCodeLengths
-  | RepeatHuffmanCodeLengths;
+  | RepeatHuffmanCodeLengths
+  | GzipHeader
+  | GzipFooter;
+
+type BitInfoType = BitInfo['type'];
 
 type Metadata = BitInfo[];

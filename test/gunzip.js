@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { readFileSync, existsSync } from 'fs';
 import { test } from 'uvu';
 import { deepStrictEqual, strictEqual } from 'assert';
-import { formatMetadata } from '../log.js';
+import { formatMetadata, logMetadata } from '../log.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** @type {(...args: string[]) => string} */
@@ -48,6 +48,33 @@ testFiles.forEach((testFile) => {
     if (expectedMeta) {
       deepStrictEqual(formatMetadata(metadata), expectedMeta);
     }
+
+    // logMetadata(metadata);
+
+    let bitSize = metadata.reduce((sum, d) => sum + d.loc.length, 0);
+    let last = metadata[metadata.length - 1];
+    let sizePerLast = last.loc.index + last.loc.length;
+    strictEqual(bitSize, sizePerLast, 'computed sizes do not match');
+
+    let expectedLen = input.length * 8;
+    let byteSize = bitSize + (bitSize % 8 == 0 ? 0 : 8 - (bitSize % 8));
+    strictEqual(
+      byteSize,
+      expectedLen,
+      'compute size does not match actual size'
+    );
+
+    let actualText = metadata.reduce(
+      (s, d) =>
+        d.type == 'literal'
+          ? s + String.fromCharCode(d.value)
+          : d.type == 'lz77'
+          ? s + d.values.map((v) => String.fromCharCode(v)).join('')
+          : s,
+      ''
+    );
+
+    strictEqual(actualText, expectedOut);
   });
 });
 
