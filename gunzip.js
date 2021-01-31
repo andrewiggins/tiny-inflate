@@ -1,4 +1,5 @@
 import inflate from './index.js';
+import { uint8ToBitString } from './log.js';
 
 // From https://github.com/101arrowz/fflate/blob/8cd81460b67bb2c92c6549ea51ca7bbb2c8c9869/src/index.ts#L1013
 
@@ -35,6 +36,10 @@ export default function gunzip(data, out = new Uint8Array(gzl(data))) {
     out
   );
 
+  console.log(uint8ToBitString(data.subarray(0, gzipDataStart)));
+  console.log(uint8ToBitString(data.subarray(gzipDataStart, gzipDataEnd)));
+  console.log(uint8ToBitString(data.subarray(gzipDataEnd)));
+
   let lastIndex = 0;
   return {
     result,
@@ -42,7 +47,7 @@ export default function gunzip(data, out = new Uint8Array(gzl(data))) {
       {
         type: 'gzip_header',
         loc: { index: 0, length: gzipDataStart * 8 },
-        rawValue: Array.from(data.subarray(0, gzipDataStart)),
+        rawValue: data.subarray(0, gzipDataStart),
       },
       ...metadata.map((d) => {
         lastIndex = d.loc.index + gzipDataStart * 8 + d.loc.length;
@@ -57,7 +62,7 @@ export default function gunzip(data, out = new Uint8Array(gzl(data))) {
       {
         type: 'gzip_footer',
         loc: { index: lastIndex, length: 8 * 8 },
-        rawValue: Array.from(data.subarray(-8, 0)),
+        rawValue: data.subarray(gzipDataEnd),
       },
     ],
   };

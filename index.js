@@ -194,11 +194,12 @@ function tinf_read_bits(d, num, base) {
     d.bitcount += 8;
   }
 
-  // Need to AND tag with 0b1111 where the number of 1s in the binary equal num.
-  // This line of code does that (up to 16 bits). 0xffff is 16 1s. Shift that
-  // binary 16 - num to end up with a binary that is of length num filled with
-  // 1s. In other words, if num is 2, 0b1111111111111111 >>> 14 = 0b11. Use the
-  // result to read the 0b11 bits of the tag.
+  // Need to AND tag with 0b1111 where the number of 1s in the binary number
+  // equal the length of num. This line of code does that (up to 16 bits).
+  // 0xffff is 16 1s. Shift that binary 16 - num to end up with a binary that is
+  // of length num filled with 1s. In other words, if num is 2,
+  // 0b1111111111111111 >>> 14 = 0b11. Use the result to read the 0b11 bits of
+  // the tag.
   let val = d.tag & (0xffff >>> (16 - num));
   d.tag >>>= num;
   d.bitcount -= num;
@@ -221,6 +222,7 @@ function tinf_decode_symbol(d, t) {
     d.bitcount += 8;
   }
 
+  lastSymbolRaw = 0;
   let sum = 0;
   let cur = 0;
   let len = 0;
@@ -228,6 +230,8 @@ function tinf_decode_symbol(d, t) {
 
   /* get more bits while code value is above sum */
   do {
+    lastSymbolRaw = (lastSymbolRaw << 1) | (tag & 1);
+
     cur = 2 * cur + (tag & 1);
     tag >>>= 1;
     ++len;
@@ -241,7 +245,6 @@ function tinf_decode_symbol(d, t) {
 
   d.bitIndex += len;
   lastSymbolLen = len;
-  lastSymbolRaw = sum + cur; // TODO: is this right?
 
   return t.trans[sum + cur];
 }
@@ -344,8 +347,10 @@ function tinf_decode_trees(d, lt, dt) {
             length: lastSymbolLen + 2,
           },
           huffmanCodeLength: prev,
+          rawSymbol: { bits: lastSymbolRaw, length: lastSymbolLen },
+          rawRepeatCount: { bits: repeatCount - 3, length: 2 },
+          symbol: sym,
           repeatCount,
-          rawValue: (lastSymbolRaw << 2) | (repeatCount - 3),
           symbols,
           category,
         });
@@ -369,8 +374,10 @@ function tinf_decode_trees(d, lt, dt) {
             length: lastSymbolLen + 3,
           },
           huffmanCodeLength: 0,
+          rawSymbol: { bits: lastSymbolRaw, length: lastSymbolLen },
+          rawRepeatCount: { bits: repeatCount - 3, length: 3 },
+          symbol: sym,
           repeatCount,
-          rawValue: (lastSymbolRaw << 3) | (repeatCount - 3),
           symbols,
           category,
         });
@@ -394,8 +401,10 @@ function tinf_decode_trees(d, lt, dt) {
             length: lastSymbolLen + 7,
           },
           huffmanCodeLength: 0,
+          rawSymbol: { bits: lastSymbolRaw, length: lastSymbolLen },
+          rawRepeatCount: { bits: repeatCount - 11, length: 7 },
+          symbol: sym,
           repeatCount,
-          rawValue: (lastSymbolRaw << 7) | (repeatCount - 11),
           symbols,
           category,
         });
@@ -459,10 +468,14 @@ function tinf_inflate_block_data(d, lt, dt) {
 
       d.dest[d.destLen++] = sym;
     } else {
-      let length, dist, offs;
+      let length, distSym, offs;
       let i;
 
-      let lengthRaw = lastSymbolRaw;
+      /** @type {BitsRead} */
+      let lengthRaw = {
+        bits: lastSymbolRaw,
+        length: lastSymbolLen,
+      };
       let size = lastSymbolLen;
 
       // Convert the length symbol into an index into the length_bits and
@@ -478,19 +491,23 @@ function tinf_inflate_block_data(d, lt, dt) {
       size += length_bits[sym];
 
       // Read the LZ77 distance symbol using the distance huffman tree
-      dist = tinf_decode_symbol(d, dt);
+      distSym = tinf_decode_symbol(d, dt);
 
+      let distRaw = {
+        bits: lastSymbolRaw,
+        length: lastSymbolLen,
+      };
       size += lastSymbolLen;
-      let distRaw = lastSymbolRaw;
 
       // https://tools.ietf.org/html/rfc1951#section-3.2.5
       // Read the extra bits for the LZ77 distance symbol, and its "base"
       // distance to the integer represented by the extra bits. Then subtract
       // that distance from the current length of the destination buffer to get
       // the offset this LZ77 back reference stats at
-      let distValue = tinf_read_bits(d, dist_bits[dist], dist_base[dist]);
+      let distValue = tinf_read_bits(d, dist_bits[distSym], dist_base[distSym]);
       offs = d.destLen - distValue;
-      size += dist_bits[dist];
+
+      size += dist_bits[distSym];
 
       // Copy the symbols represented by this LZ77 back reference to the end of
       // the destination buffer
@@ -508,13 +525,19 @@ function tinf_inflate_block_data(d, lt, dt) {
         length: {
           rawSymbol: lengthRaw,
           symbol: sym + 257,
-          extraBits: length - length_base[sym],
+          extraBits: {
+            bits: length - length_base[sym],
+            length: length_bits[sym],
+          },
           value: length,
         },
         dist: {
           rawSymbol: distRaw,
-          symbol: dist,
-          extraBits: distValue - dist_base[dist],
+          symbol: distSym,
+          extraBits: {
+            bits: distValue - dist_base[distSym],
+            length: dist_bits[distSym],
+          },
           value: distValue,
         },
       });

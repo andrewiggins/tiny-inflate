@@ -222,3 +222,189 @@ function toChar(num) {
     return ch;
   }
 }
+
+/**
+ * @param {Uint8Array} uint8
+ */
+export function uint8ToBitString(uint8) {
+  return Array.from(uint8)
+    .map((v) => v.toString(2))
+    .join('');
+}
+
+/**
+ * @param {number} num
+ */
+function toByteStr(num) {
+  return num.toString(2).padStart(8, '0');
+}
+
+/**
+ * @param {number} value
+ * @param {number} length
+ */
+function invertBits(value, length) {
+  let invertedValue = 0;
+  while (length--) {
+    invertedValue = (invertedValue << 1) | (value & 1);
+    value >>>= 1;
+  }
+
+  return invertedValue;
+}
+
+/**
+ * @param {Metadata} metadata
+ * @param {Uint8Array} inputUint8
+ * @returns {Uint8Array}
+ */
+export function reconstructBinary(metadata, inputUint8) {
+  const input = Array.from(inputUint8);
+
+  // Relevant section from spec:
+  // 3.1.1. Packing into bytes
+  //
+  // This document does not address the issue of the order in which bits of a
+  // byte are transmitted on a bit-sequential medium, since the final data
+  // format described here is byte- rather than bit-oriented.  However, we
+  // describe the compressed block format in below, as a sequence of data
+  // elements of various bit lengths, not a sequence of bytes.  We must
+  // therefore specify how to pack these data elements into bytes to form the
+  // final compressed byte sequence:
+  //
+  //      * Data elements are packed into bytes in order of
+  //        increasing bit number within the byte, i.e., starting
+  //        with the least-significant bit of the byte.
+  //      * Data elements other than Huffman codes are packed
+  //        starting with the least-significant bit of the data
+  //        element.
+  //      * Huffman codes are packed starting with the most-
+  //        significant bit of the code.
+  //
+  //  In other words, if one were to print out the compressed data as a sequence
+  //  of bytes, starting with the first byte at the *right* margin and
+  //  proceeding to the *left*, with the most- significant bit of each byte on
+  //  the left as usual, one would be able to parse the result from right to
+  //  left, with fixed-width elements in the correct MSB-to-LSB order and
+  //  Huffman codes in bit-reversed order (i.e., with the first bit of the code
+  //  in the relative LSB position).
+
+  let last = metadata[metadata.length - 1];
+  let bitSize = last.loc.index + last.loc.length;
+  let byteSize = Math.ceil(bitSize / 8);
+
+  let resultIndex = 0;
+  let byteBuffer = 0;
+  let bitCount = 0;
+  let result = new Uint8Array(byteSize);
+
+  /** @type {(bits: number, length: number) => void} */
+  const writeBitsToResult = (bits, length) => {
+    while (length--) {
+      let bitToSet = bits & 1;
+      bits = bits >> 1;
+
+      byteBuffer = byteBuffer | (bitToSet << bitCount);
+      bitCount++;
+
+      if (bitCount == 8) {
+        if (byteBuffer !== input[resultIndex]) {
+          throw new Error(
+            `Expected ${toByteStr(byteBuffer)} to be ${toByteStr(
+              input[resultIndex]
+            )} at index ${resultIndex}.`
+          );
+        }
+
+        result.set([byteBuffer], resultIndex);
+        resultIndex++;
+        byteBuffer = bitCount = 0;
+      }
+    }
+  };
+
+  for (let datum of metadata) {
+    switch (datum.type) {
+      case 'gzip_header':
+        result.set(datum.rawValue, resultIndex);
+        resultIndex += datum.rawValue.length;
+        break;
+      case 'gzip_footer':
+        if (bitCount > 0) {
+          result.set([byteBuffer], resultIndex);
+          resultIndex++;
+          byteBuffer = bitCount = 0;
+        }
+
+        result.set(datum.rawValue, resultIndex);
+        resultIndex += datum.rawValue.length;
+        break;
+      case 'bfinal':
+      case 'btype':
+      case 'hlit':
+      case 'hdist':
+      case 'hclen':
+        writeBitsToResult(datum.rawValue, datum.loc.length);
+        break;
+      case 'block_end':
+      case 'literal': {
+        let datumLength = datum.loc.length;
+        let datumValue = invertBits(datum.rawValue, datumLength);
+        writeBitsToResult(datumValue, datumLength);
+        break;
+      }
+      case 'code_length': {
+        let datumLength = datum.loc.length;
+        let datumValue = datum.rawValue;
+        if (datum.category !== 'run_length_table') {
+          datumValue = invertBits(datumValue, datumLength);
+        }
+
+        writeBitsToResult(datumValue, datumLength);
+        break;
+      }
+      case 'repeat_code_length': {
+        let invertedBits = invertBits(
+          datum.rawSymbol.bits,
+          datum.rawSymbol.length
+        );
+        writeBitsToResult(invertedBits, datum.rawSymbol.length);
+        writeBitsToResult(
+          datum.rawRepeatCount.bits,
+          datum.rawRepeatCount.length
+        );
+        break;
+      }
+      case 'lz77': {
+        let info = datum.length;
+        let invertedValue = invertBits(
+          info.rawSymbol.bits,
+          info.rawSymbol.length
+        );
+        writeBitsToResult(invertedValue, info.rawSymbol.length);
+        writeBitsToResult(info.extraBits.bits, info.extraBits.length);
+
+        info = datum.dist;
+        invertedValue = invertBits(info.rawSymbol.bits, info.rawSymbol.length);
+        writeBitsToResult(invertedValue, info.rawSymbol.length);
+        writeBitsToResult(info.extraBits.bits, info.extraBits.length);
+        break;
+      }
+      default:
+        assertNever(
+          datum,
+          `Metadata type not handled: ${JSON.stringify(datum)}`
+        );
+    }
+  }
+
+  return result;
+}
+
+/**
+ * @param {never} val
+ * @param {string} msg
+ */
+function assertNever(val, msg) {
+  throw new Error(msg);
+}

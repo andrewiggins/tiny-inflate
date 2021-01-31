@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { readFileSync, existsSync } from 'fs';
 import { test } from 'uvu';
 import { deepStrictEqual, strictEqual } from 'assert';
-import { formatMetadata, logMetadata } from '../log.js';
+import { formatMetadata, logMetadata, reconstructBinary } from '../log.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** @type {(...args: string[]) => string} */
@@ -49,7 +49,7 @@ testFiles.forEach((testFile) => {
       deepStrictEqual(formatMetadata(metadata), expectedMeta);
     }
 
-    // logMetadata(metadata);
+    logMetadata(metadata);
 
     let bitSize = metadata.reduce((sum, d) => sum + d.loc.length, 0);
     let last = metadata[metadata.length - 1];
@@ -57,9 +57,9 @@ testFiles.forEach((testFile) => {
     strictEqual(bitSize, sizePerLast, 'computed sizes do not match');
 
     let expectedLen = input.length * 8;
-    let byteSize = bitSize + (bitSize % 8 == 0 ? 0 : 8 - (bitSize % 8));
+    let byteRoundedSize = bitSize + (bitSize % 8 == 0 ? 0 : 8 - (bitSize % 8));
     strictEqual(
-      byteSize,
+      byteRoundedSize,
       expectedLen,
       'compute size does not match actual size'
     );
@@ -73,8 +73,16 @@ testFiles.forEach((testFile) => {
           : s,
       ''
     );
-
     strictEqual(actualText, expectedOut);
+
+    let reconstructedBits = reconstructBinary(metadata, input);
+    deepStrictEqual(
+      Array.from(reconstructedBits).map((v) => v.toString(2).padStart(8, '0')),
+      Array.from(new Uint8Array(input)).map((v) =>
+        v.toString(2).padStart(8, '0')
+      ),
+      'reconstructed binary should match input binary'
+    );
   });
 });
 

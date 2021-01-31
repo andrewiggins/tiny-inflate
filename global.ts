@@ -1,4 +1,7 @@
-// TODO: rawValue & bits
+// - TODO: Remove loc property
+// - TODO: Replace rawValue type with BitsRead type
+// - TODO: Extend BitsREad with a value prop to represent what the decoded bytes
+//   mean
 
 type CodeLengthCategory =
   | 'run_length_table'
@@ -7,6 +10,11 @@ type CodeLengthCategory =
 
 interface BitLocation {
   index: number;
+  length: number;
+}
+
+interface BitsRead {
+  bits: number;
   length: number;
 }
 
@@ -32,9 +40,9 @@ interface LZ77Value {
   /** The decoded symbol that started this LZ77 value */
   symbol: number;
   /** The encoded bits that map to the the defined symbol */
-  rawSymbol: number;
+  rawSymbol: BitsRead;
   /** The extra bits associated  */
-  extraBits: number;
+  extraBits: BitsRead;
 }
 
 interface LZ77BitInfo {
@@ -61,8 +69,12 @@ interface RepeatHuffmanCodeLengths {
   type: 'repeat_code_length';
   loc: BitLocation;
   category: CodeLengthCategory;
-  /** The raw bits that represent this repeat code */
-  rawValue: number;
+  /** The raw bits that signaled this repeat code */
+  rawSymbol: BitsRead;
+  /** The bits read to signal how long to repeat this code length */
+  rawRepeatCount: BitsRead;
+  /** The decoded symbol that represents what kind of repeat this is (16, 17, or 18) */
+  symbol: number;
   /** The decoded count to repeat this code length */
   repeatCount: number;
   /** The decoded huffman code length to repeat */
@@ -74,13 +86,13 @@ interface RepeatHuffmanCodeLengths {
 interface GzipHeader {
   type: 'gzip_header';
   loc: BitLocation;
-  rawValue: number[];
+  rawValue: Uint8Array;
 }
 
 interface GzipFooter {
   type: 'gzip_footer';
   loc: BitLocation;
-  rawValue: number[];
+  rawValue: Uint8Array;
 }
 
 type BitInfo =
