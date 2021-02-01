@@ -40,29 +40,17 @@ export default function gunzip(data, out = new Uint8Array(gzl(data))) {
   console.log(uint8ToBitString(data.subarray(gzipDataStart, gzipDataEnd)));
   console.log(uint8ToBitString(data.subarray(gzipDataEnd)));
 
-  let lastIndex = 0;
   return {
     result,
     metadata: [
       {
         type: 'gzip_header',
-        loc: { index: 0, length: gzipDataStart * 8 },
-        rawValue: data.subarray(0, gzipDataStart),
+        bytes: data.subarray(0, gzipDataStart),
       },
-      ...metadata.map((d) => {
-        lastIndex = d.loc.index + gzipDataStart * 8 + d.loc.length;
-        return {
-          ...d,
-          loc: {
-            index: d.loc.index + gzipDataStart * 8,
-            length: d.loc.length,
-          },
-        };
-      }),
+      ...metadata,
       {
         type: 'gzip_footer',
-        loc: { index: lastIndex, length: 8 * 8 },
-        rawValue: data.subarray(gzipDataEnd),
+        bytes: data.subarray(gzipDataEnd),
       },
     ],
   };

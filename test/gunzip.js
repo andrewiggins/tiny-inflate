@@ -4,7 +4,12 @@ import { fileURLToPath } from 'url';
 import { readFileSync, existsSync } from 'fs';
 import { test } from 'uvu';
 import { deepStrictEqual, strictEqual } from 'assert';
-import { formatMetadata, logMetadata, reconstructBinary } from '../log.js';
+import {
+  formatMetadata,
+  getTotalEncodedBitSize,
+  logMetadata,
+  reconstructBinary,
+} from '../log.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** @type {(...args: string[]) => string} */
@@ -51,11 +56,7 @@ testFiles.forEach((testFile) => {
 
     logMetadata(metadata);
 
-    let bitSize = metadata.reduce((sum, d) => sum + d.loc.length, 0);
-    let last = metadata[metadata.length - 1];
-    let sizePerLast = last.loc.index + last.loc.length;
-    strictEqual(bitSize, sizePerLast, 'computed sizes do not match');
-
+    let bitSize = getTotalEncodedBitSize(metadata);
     let expectedLen = input.length * 8;
     let byteRoundedSize = bitSize + (bitSize % 8 == 0 ? 0 : 8 - (bitSize % 8));
     strictEqual(
@@ -67,9 +68,9 @@ testFiles.forEach((testFile) => {
     let actualText = metadata.reduce(
       (s, d) =>
         d.type == 'literal'
-          ? s + String.fromCharCode(d.value)
+          ? s + String.fromCharCode(d.value.decoded)
           : d.type == 'lz77'
-          ? s + d.values.map((v) => String.fromCharCode(v)).join('')
+          ? s + d.chars.map((v) => String.fromCharCode(v)).join('')
           : s,
       ''
     );

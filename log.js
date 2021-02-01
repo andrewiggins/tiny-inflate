@@ -50,9 +50,9 @@ export function formatMetadata(metadata) {
   for (let info of metadata) {
     switch (info.type) {
       case 'bfinal':
-        let bfinal = info.value;
+        let bfinal = info.value.decoded;
         out += log({
-          size: info.loc.length,
+          size: info.value.size,
           msg:
             bfinal == 1
               ? `Last block (val: ${bfinal})`
@@ -61,7 +61,7 @@ export function formatMetadata(metadata) {
         break;
 
       case 'btype':
-        let btype = info.value;
+        let btype = info.value.decoded;
         let msg =
           btype == 0
             ? `Uncompressed block (val: ${btype})`
@@ -69,39 +69,39 @@ export function formatMetadata(metadata) {
             ? `Fixed Huffman Tree block (val: ${btype})`
             : `Dynamic Huffman Tree block (val: ${btype})`;
 
-        out += log({ size: info.loc.length, msg });
+        out += log({ size: info.value.size, msg });
         break;
 
       case 'hlit':
-        let hlit = info.value;
+        let hlit = info.value.decoded;
         out += log({
-          size: info.loc.length,
+          size: info.value.size,
           msg: `HLIT  ${hlit.toString().padStart(3)} (val:${hlit - 257})`,
         });
         break;
 
       case 'hdist':
-        let hdist = info.value;
+        let hdist = info.value.decoded;
         out += log({
-          size: info.loc.length,
+          size: info.value.size,
           msg: `HDIST ${hdist.toString().padStart(3)} (val:${hdist - 1})`,
         });
         break;
 
       case 'hclen':
-        let hclen = info.value;
+        let hclen = info.value.decoded;
         out += log({
-          size: info.loc.length,
+          size: info.value.size,
           msg: `HCLEN ${hclen.toString().padStart(3)} (val:${hclen - 4})`,
         });
         break;
 
       case 'code_length': {
         out += log({
-          size: info.loc.length,
+          size: info.value.size,
           msg: getCodeLengthMessage(
             info.category,
-            info.symbol,
+            info.char,
             info.huffmanCodeLength
           ),
         });
@@ -110,11 +110,11 @@ export function formatMetadata(metadata) {
       case 'repeat_code_length': {
         let label = info.huffmanCodeLength == 0 ? 'ZREP' : 'LREP';
         out += log({
-          size: info.loc.length,
-          msg: `${label} (${info.repeatCount} times)`,
+          size: info.symbol.size + info.repeatCount.size,
+          msg: `${label} (${info.repeatCount.decoded} times)`,
         });
 
-        for (let symbol of info.symbols) {
+        for (let symbol of info.chars) {
           out += log({
             size: null,
             msg: getCodeLengthMessage(
@@ -128,23 +128,23 @@ export function formatMetadata(metadata) {
         break;
       }
       case 'literal': {
-        let sym = info.value;
+        let sym = info.value.decoded;
         out += log({
-          size: info.loc.length,
+          size: info.value.size,
           msg: `${toHex(sym)}  ${toChar(sym)}`,
         });
         break;
       }
-      case 'lz77':
+      case 'lz77': {
         out += log({
-          size: info.loc.length,
+          size: getLZ77TotalBitSize(info),
           msg: `(${info.length.value},${info.dist.value})`,
         });
         break;
-
+      }
       case 'block_end':
         out += log({
-          size: info.loc.length,
+          size: info.value.size,
           msg: `EofB`,
         });
         break;
@@ -157,7 +157,7 @@ export function formatMetadata(metadata) {
 /**
  * @param {{ size: number | null; msg: string; }} props
  */
-export function log({ size, msg }) {
+function log({ size, msg }) {
   if (size == null) {
     return ` [_] ${msg}\n`;
   } else if (size < 10) {
@@ -254,6 +254,40 @@ function invertBits(value, length) {
 }
 
 /**
+ * @param {LZ77BitInfo} info
+ * @returns {number}
+ */
+function getLZ77TotalBitSize(info) {
+  let length = info.length;
+  let dist = info.dist;
+
+  return (
+    length.symbol.size +
+    length.extraBits.size +
+    dist.symbol.size +
+    dist.extraBits.size
+  );
+}
+
+/**
+ * @param {Metadata} metadata
+ * @returns {number}
+ */
+export function getTotalEncodedBitSize(metadata) {
+  return metadata.reduce((sum, datum) => {
+    if (datum.type == 'lz77') {
+      return sum + getLZ77TotalBitSize(datum);
+    } else if (datum.type == 'repeat_code_length') {
+      return sum + datum.symbol.size + datum.repeatCount.size;
+    } else if (datum.type == 'gzip_header' || datum.type == 'gzip_footer') {
+      return sum + datum.bytes.length * 8;
+    } else {
+      return sum + datum.value.size;
+    }
+  }, 0);
+}
+
+/**
  * @param {Metadata} metadata
  * @param {Uint8Array} inputUint8
  * @returns {Uint8Array}
@@ -289,9 +323,7 @@ export function reconstructBinary(metadata, inputUint8) {
   //  Huffman codes in bit-reversed order (i.e., with the first bit of the code
   //  in the relative LSB position).
 
-  let last = metadata[metadata.length - 1];
-  let bitSize = last.loc.index + last.loc.length;
-  let byteSize = Math.ceil(bitSize / 8);
+  let byteSize = Math.ceil(getTotalEncodedBitSize(metadata) / 8);
 
   let resultIndex = 0;
   let byteBuffer = 0;
@@ -326,8 +358,8 @@ export function reconstructBinary(metadata, inputUint8) {
   for (let datum of metadata) {
     switch (datum.type) {
       case 'gzip_header':
-        result.set(datum.rawValue, resultIndex);
-        resultIndex += datum.rawValue.length;
+        result.set(datum.bytes, resultIndex);
+        resultIndex += datum.bytes.length;
         break;
       case 'gzip_footer':
         if (bitCount > 0) {
@@ -336,26 +368,26 @@ export function reconstructBinary(metadata, inputUint8) {
           byteBuffer = bitCount = 0;
         }
 
-        result.set(datum.rawValue, resultIndex);
-        resultIndex += datum.rawValue.length;
+        result.set(datum.bytes, resultIndex);
+        resultIndex += datum.bytes.length;
         break;
       case 'bfinal':
       case 'btype':
       case 'hlit':
       case 'hdist':
       case 'hclen':
-        writeBitsToResult(datum.rawValue, datum.loc.length);
+        writeBitsToResult(datum.value.bits, datum.value.size);
         break;
       case 'block_end':
       case 'literal': {
-        let datumLength = datum.loc.length;
-        let datumValue = invertBits(datum.rawValue, datumLength);
-        writeBitsToResult(datumValue, datumLength);
+        let datumSize = datum.value.size;
+        let datumValue = invertBits(datum.value.bits, datumSize);
+        writeBitsToResult(datumValue, datumSize);
         break;
       }
       case 'code_length': {
-        let datumLength = datum.loc.length;
-        let datumValue = datum.rawValue;
+        let datumLength = datum.value.size;
+        let datumValue = datum.value.bits;
         if (datum.category !== 'run_length_table') {
           datumValue = invertBits(datumValue, datumLength);
         }
@@ -364,30 +396,21 @@ export function reconstructBinary(metadata, inputUint8) {
         break;
       }
       case 'repeat_code_length': {
-        let invertedBits = invertBits(
-          datum.rawSymbol.bits,
-          datum.rawSymbol.length
-        );
-        writeBitsToResult(invertedBits, datum.rawSymbol.length);
-        writeBitsToResult(
-          datum.rawRepeatCount.bits,
-          datum.rawRepeatCount.length
-        );
+        let invertedBits = invertBits(datum.symbol.bits, datum.symbol.size);
+        writeBitsToResult(invertedBits, datum.symbol.size);
+        writeBitsToResult(datum.repeatCount.bits, datum.repeatCount.size);
         break;
       }
       case 'lz77': {
         let info = datum.length;
-        let invertedValue = invertBits(
-          info.rawSymbol.bits,
-          info.rawSymbol.length
-        );
-        writeBitsToResult(invertedValue, info.rawSymbol.length);
-        writeBitsToResult(info.extraBits.bits, info.extraBits.length);
+        let invertedValue = invertBits(info.symbol.bits, info.symbol.size);
+        writeBitsToResult(invertedValue, info.symbol.size);
+        writeBitsToResult(info.extraBits.bits, info.extraBits.size);
 
         info = datum.dist;
-        invertedValue = invertBits(info.rawSymbol.bits, info.rawSymbol.length);
-        writeBitsToResult(invertedValue, info.rawSymbol.length);
-        writeBitsToResult(info.extraBits.bits, info.extraBits.length);
+        invertedValue = invertBits(info.symbol.bits, info.symbol.size);
+        writeBitsToResult(invertedValue, info.symbol.size);
+        writeBitsToResult(info.extraBits.bits, info.extraBits.size);
         break;
       }
       default:

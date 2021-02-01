@@ -27,6 +27,7 @@ Trying to be consistent with the terminology I use for various parts of this alg
 <dd>The data structure used to read bits and turn huffman codes into a their original symbols.</dd>
 
 <dt>Symbol</dt>
+<dd><em>Consider renaming to character? And using symbol to refer to codes in the bit stream?</em></dd>
 <dd>A single member of an alphabet a Huffman tree encodes. Translating a huffman code into its uncompressed form turns an huffman code into a symbol</dd>
 
 <dt>Bit length</dt>

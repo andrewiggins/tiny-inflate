@@ -1,5 +1,3 @@
-import { logMetadata } from './log.js';
-
 const TINF_OK = 0;
 const TINF_DATA_ERROR = -3;
 
@@ -25,7 +23,6 @@ class Data {
     this.source = source;
     /** Index of the next byte to load from source */
     this.sourceIndex = 0;
-    this.bitIndex = 0;
 
     /** Buffer containing yet to be consumed bits from source */
     this.tag = 0;
@@ -172,8 +169,6 @@ function tinf_getbit(d) {
   let bit = d.tag & 1;
   d.tag >>>= 1;
 
-  d.bitIndex += 1;
-
   return bit;
 }
 
@@ -203,8 +198,6 @@ function tinf_read_bits(d, num, base) {
   let val = d.tag & (0xffff >>> (16 - num));
   d.tag >>>= num;
   d.bitcount -= num;
-
-  d.bitIndex += num;
 
   return val + base;
 }
@@ -243,7 +236,6 @@ function tinf_decode_symbol(d, t) {
   d.tag = tag;
   d.bitcount -= len;
 
-  d.bitIndex += len;
   lastSymbolLen = len;
 
   return t.trans[sum + cur];
@@ -264,9 +256,11 @@ function tinf_decode_trees(d, lt, dt) {
   hlit = tinf_read_bits(d, 5, 257);
   metadata.push({
     type: 'hlit',
-    value: hlit,
-    rawValue: hlit - 257,
-    loc: { index: d.bitIndex - 5, length: 5 },
+    value: {
+      bits: hlit - 257,
+      size: 5,
+      decoded: hlit,
+    },
   });
 
   /* get 5 bits HDIST (1-32) */
@@ -274,9 +268,11 @@ function tinf_decode_trees(d, lt, dt) {
   hdist = tinf_read_bits(d, 5, 1);
   metadata.push({
     type: 'hdist',
-    value: hdist,
-    rawValue: hdist - 1,
-    loc: { index: d.bitIndex - 5, length: 5 },
+    value: {
+      bits: hdist - 1,
+      size: 5,
+      decoded: hdist,
+    },
   });
 
   /* get 4 bits HCLEN (4-19) */
@@ -285,9 +281,11 @@ function tinf_decode_trees(d, lt, dt) {
   hclen = tinf_read_bits(d, 4, 4);
   metadata.push({
     type: 'hclen',
-    value: hclen,
-    rawValue: hclen - 4,
-    loc: { index: d.bitIndex - 4, length: 4 },
+    value: {
+      bits: hclen - 4,
+      size: 4,
+      decoded: hclen,
+    },
   });
 
   // Re-initialize the shared lengths array to all zeros
@@ -301,11 +299,14 @@ function tinf_decode_trees(d, lt, dt) {
 
     metadata.push({
       type: 'code_length',
-      loc: { index: d.bitIndex - 3, length: 3 },
       category: 'run_length_table',
-      symbol: clcidx[i],
       huffmanCodeLength: clen,
-      rawValue: clen,
+      char: clcidx[i],
+      value: {
+        bits: clen,
+        size: 3,
+        decoded: clen,
+      },
     });
   }
 
@@ -320,10 +321,10 @@ function tinf_decode_trees(d, lt, dt) {
 
     /** @type {CodeLengthCategory} */
     const category = num < hlit ? 'lz77_length_table' : 'lz77_dist_table';
-    /** @type {(num: number) => number} */
-    const getRealSym = (num) =>
-      // For the lz77_length table, we think of symbols as the values 0 - 287
-      // while for the distance table we think of symbols as the values 0 - 31
+    /** @type {(num: number) => number} Get the "character" in this table's alphabet this symbol represents */
+    const getChar = (num) =>
+      // For the lz77_length table, we think of characters as the values 0 - 287.
+      // But for the distance table we think of characters as the values 0 - 31
       category == 'lz77_length_table' ? num : num - hlit;
 
     switch (sym) {
@@ -331,82 +332,88 @@ function tinf_decode_trees(d, lt, dt) {
         /* copy previous code length 3-6 times (read 2 bits) */
         let prev = lengths[num - 1];
 
-        let symbols = [];
+        let chars = [];
         let repeatCount = tinf_read_bits(d, 2, 3);
         for (length = repeatCount; length; --length) {
           let sym = num++;
           lengths[sym] = prev;
 
-          symbols.push(getRealSym(sym));
+          chars.push(getChar(sym));
         }
 
         metadata.push({
           type: 'repeat_code_length',
-          loc: {
-            index: d.bitIndex - lastSymbolLen - 2,
-            length: lastSymbolLen + 2,
-          },
-          huffmanCodeLength: prev,
-          rawSymbol: { bits: lastSymbolRaw, length: lastSymbolLen },
-          rawRepeatCount: { bits: repeatCount - 3, length: 2 },
-          symbol: sym,
-          repeatCount,
-          symbols,
           category,
+          huffmanCodeLength: prev,
+          chars,
+          symbol: {
+            bits: lastSymbolRaw,
+            size: lastSymbolLen,
+            decoded: sym,
+          },
+          repeatCount: {
+            bits: repeatCount - 3,
+            size: 2,
+            decoded: repeatCount,
+          },
         });
         break;
       }
       case 17: {
         /* repeat code length 0 for 3-10 times (read 3 bits) */
         let repeatCount = tinf_read_bits(d, 3, 3);
-        let symbols = [];
+        let chars = [];
         for (length = repeatCount; length; --length) {
           let sym = num++;
           lengths[sym] = 0;
 
-          symbols.push(getRealSym(sym));
+          chars.push(getChar(sym));
         }
 
         metadata.push({
           type: 'repeat_code_length',
-          loc: {
-            index: d.bitIndex - lastSymbolLen - 3,
-            length: lastSymbolLen + 3,
-          },
           huffmanCodeLength: 0,
-          rawSymbol: { bits: lastSymbolRaw, length: lastSymbolLen },
-          rawRepeatCount: { bits: repeatCount - 3, length: 3 },
-          symbol: sym,
-          repeatCount,
-          symbols,
           category,
+          chars,
+          symbol: {
+            bits: lastSymbolRaw,
+            size: lastSymbolLen,
+            decoded: sym,
+          },
+          repeatCount: {
+            bits: repeatCount - 3,
+            size: 3,
+            decoded: repeatCount,
+          },
         });
         break;
       }
       case 18: {
         /* repeat code length 0 for 11-138 times (read 7 bits) */
         let repeatCount = tinf_read_bits(d, 7, 11);
-        let symbols = [];
+        let chars = [];
         for (length = repeatCount; length; --length) {
           let sym = num++;
           lengths[sym] = 0;
 
-          symbols.push(getRealSym(sym));
+          chars.push(getChar(sym));
         }
 
         metadata.push({
           type: 'repeat_code_length',
-          loc: {
-            index: d.bitIndex - lastSymbolLen - 3,
-            length: lastSymbolLen + 7,
-          },
           huffmanCodeLength: 0,
-          rawSymbol: { bits: lastSymbolRaw, length: lastSymbolLen },
-          rawRepeatCount: { bits: repeatCount - 11, length: 7 },
-          symbol: sym,
-          repeatCount,
-          symbols,
           category,
+          chars,
+          symbol: {
+            bits: lastSymbolRaw,
+            size: lastSymbolLen,
+            decoded: sym,
+          },
+          repeatCount: {
+            bits: repeatCount - 11,
+            size: 7,
+            decoded: repeatCount,
+          },
         });
         break;
       }
@@ -415,11 +422,14 @@ function tinf_decode_trees(d, lt, dt) {
         lengths[num++] = sym;
         metadata.push({
           type: 'code_length',
-          loc: { index: d.bitIndex - lastSymbolLen, length: lastSymbolLen },
-          rawValue: lastSymbolRaw,
-          huffmanCodeLength: sym,
-          symbol: getRealSym(num - 1),
           category,
+          huffmanCodeLength: sym,
+          char: getChar(num - 1),
+          value: {
+            bits: lastSymbolRaw,
+            size: lastSymbolLen,
+            decoded: sym,
+          },
         });
         break;
       }
@@ -450,9 +460,11 @@ function tinf_inflate_block_data(d, lt, dt) {
     if (sym === 256) {
       metadata.push({
         type: 'block_end',
-        value: sym,
-        rawValue: lastSymbolRaw,
-        loc: { index: d.bitIndex - lastSymbolLen, length: lastSymbolLen },
+        value: {
+          bits: lastSymbolRaw,
+          size: lastSymbolLen,
+          decoded: sym,
+        },
       });
 
       return TINF_OK;
@@ -461,9 +473,11 @@ function tinf_inflate_block_data(d, lt, dt) {
     if (sym < 256) {
       metadata.push({
         type: 'literal',
-        value: sym,
-        rawValue: lastSymbolRaw,
-        loc: { index: d.bitIndex - lastSymbolLen, length: lastSymbolLen },
+        value: {
+          bits: lastSymbolRaw,
+          size: lastSymbolLen,
+          decoded: sym,
+        },
       });
 
       d.dest[d.destLen++] = sym;
@@ -472,11 +486,11 @@ function tinf_inflate_block_data(d, lt, dt) {
       let i;
 
       /** @type {BitsRead} */
-      let lengthRaw = {
+      let lengthSymbol = {
         bits: lastSymbolRaw,
-        length: lastSymbolLen,
+        size: lastSymbolLen,
+        decoded: sym,
       };
-      let size = lastSymbolLen;
 
       // Convert the length symbol into an index into the length_bits and
       // length_base table
@@ -488,16 +502,22 @@ function tinf_inflate_block_data(d, lt, dt) {
       // extra bits represent
       length = tinf_read_bits(d, length_bits[sym], length_base[sym]);
 
-      size += length_bits[sym];
+      /** @type {BitsRead} */
+      let lengthExtraBits = {
+        bits: length - length_base[sym],
+        size: length_bits[sym],
+        decoded: length - length_base[sym],
+      };
 
       // Read the LZ77 distance symbol using the distance huffman tree
       distSym = tinf_decode_symbol(d, dt);
 
-      let distRaw = {
+      /** @type {BitsRead} */
+      let distSymbol = {
         bits: lastSymbolRaw,
-        length: lastSymbolLen,
+        size: lastSymbolLen,
+        decoded: distSym,
       };
-      size += lastSymbolLen;
 
       // https://tools.ietf.org/html/rfc1951#section-3.2.5
       // Read the extra bits for the LZ77 distance symbol, and its "base"
@@ -507,7 +527,12 @@ function tinf_inflate_block_data(d, lt, dt) {
       let distValue = tinf_read_bits(d, dist_bits[distSym], dist_base[distSym]);
       offs = d.destLen - distValue;
 
-      size += dist_bits[distSym];
+      /** @type {BitsRead} */
+      let distExtraBits = {
+        bits: distValue - dist_base[distSym],
+        size: dist_bits[distSym],
+        decoded: distValue - dist_base[distSym],
+      };
 
       // Copy the symbols represented by this LZ77 back reference to the end of
       // the destination buffer
@@ -520,25 +545,16 @@ function tinf_inflate_block_data(d, lt, dt) {
 
       metadata.push({
         type: 'lz77',
-        loc: { index: d.bitIndex - size, length: size },
-        values,
+        chars: values,
         length: {
-          rawSymbol: lengthRaw,
-          symbol: sym + 257,
-          extraBits: {
-            bits: length - length_base[sym],
-            length: length_bits[sym],
-          },
           value: length,
+          symbol: lengthSymbol,
+          extraBits: lengthExtraBits,
         },
         dist: {
-          rawSymbol: distRaw,
-          symbol: distSym,
-          extraBits: {
-            bits: distValue - dist_base[distSym],
-            length: dist_bits[distSym],
-          },
           value: distValue,
+          symbol: distSymbol,
+          extraBits: distExtraBits,
         },
       });
     }
@@ -600,18 +616,22 @@ function tinf_uncompress(source, dest) {
     bfinal = tinf_getbit(d);
     metadata.push({
       type: 'bfinal',
-      rawValue: bfinal,
-      value: bfinal,
-      loc: { index: d.bitIndex - 1, length: 1 },
+      value: {
+        bits: bfinal,
+        size: 1,
+        decoded: bfinal,
+      },
     });
 
     /* read block type (2 bits) */
     btype = tinf_read_bits(d, 2, 0);
     metadata.push({
       type: 'btype',
-      rawValue: btype,
-      value: btype,
-      loc: { index: d.bitIndex - 2, length: 2 },
+      value: {
+        bits: btype,
+        size: 2,
+        decoded: btype,
+      },
     });
 
     /* decompress block */
